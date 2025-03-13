@@ -1,0 +1,74 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Resources:
+  CsvUploadBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: csv-upload-bucket
+
+  CsvMetadataTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: CsvMetadata
+      AttributeDefinitions:
+        - AttributeName: filename
+          AttributeType: S
+      KeySchema:
+        - AttributeName: filename
+          KeyType: HASH
+      BillingMode: PAY_PER_REQUEST
+
+  CsvProcessorLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: CsvProcessorLambdaRole
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: 
+                - lambda.amazonaws.com
+            Action: 
+              - sts:AssumeRole
+      Policies:
+        - PolicyName: LambdaS3DynamoDBPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                Resource: !Sub "arn:aws:s3:::csv-upload-bucket/*"
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                Resource: !Sub "arn:aws:dynamodb:us-east-1:000000000000:table/CsvMetadata"
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: "*"
+
+  CsvProcessorLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: CsvProcessor
+      Runtime: python3.8
+      Handler: lambda_function.lambda_handler
+      Role: !GetAtt CsvProcessorLambdaRole.Arn
+      Code:
+        S3Bucket: csv-upload-bucket
+        S3Key: function.zip
+      Environment:
+        Variables:
+          LOCALSTACK_ENDPOINT: "http://localhost:4566"
+
+  S3LambdaTrigger:
+    Type: AWS::S3::BucketNotification
+    Properties:
+      Bucket: !Ref CsvUploadBucket
+      NotificationConfiguration:
+        LambdaConfigurations:
+          - Event: "s3:ObjectCreated:*"
+            Function: !GetAtt CsvProcessorLambda.Arn
